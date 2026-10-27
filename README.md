@@ -12,11 +12,11 @@ gone when you unmount.
 ```
 
 - `src/memfs.hpp / memfs.cpp`: the filesystem itself, a tree of `Node`s.
-  Each method takes a path and returns `0` or `-errno`. It doesn't depend on
-  FUSE, so it builds and unit-tests on macOS too.
+  Each method takes a path and returns `0` or `-errno`. It has no FUSE
+  dependency, so you can unit-test it without mounting anything.
 - `src/main.cpp`: about 100 lines that connect each libfuse callback
   (`getattr`, `read`, `write`, `rename`, …) to the tree.
-- `tests/memfs_test.cpp`: unit tests for the tree (no mount needed).
+- `tests/memfs_test.cpp`: unit tests for the tree.
 - `tests/smoke_test.sh`: mounts the filesystem for real and runs shell
   commands against it.
 
@@ -24,44 +24,71 @@ Supported: files, directories, symlinks, read/write at any offset, sparse
 writes, truncate, rename (including `RENAME_NOREPLACE`), chmod, chown,
 timestamps, and `statfs` (so `df` works).
 
-## Setting up the Ubuntu VM (one time)
+## Requirements
 
-In the Ubuntu VM in UTM:
+A Linux system with FUSE 3, CMake 3.20 or newer, and a C++20 compiler.
 
-```bash
-sudo apt update
-sudo apt install -y build-essential cmake pkg-config libfuse3-dev fuse3 openssh-server rsync
-```
-
-Then, on the Mac, copy your SSH key across so scripts can log in without a password:
+Debian / Ubuntu:
 
 ```bash
-ssh-copy-id <your-vm-username>@192.168.64.3
+sudo apt install build-essential cmake pkg-config libfuse3-dev fuse3
 ```
 
-## Build and run
-
-**On the Mac** (core and unit tests only, since macOS has no Linux FUSE):
+Fedora:
 
 ```bash
-cmake -S . -B build -DMEMFS_SANITIZE=ON && cmake --build build && ctest --test-dir build
+sudo dnf install gcc-c++ cmake pkgconf-pkg-config fuse3-devel fuse3
 ```
 
-**On the VM, from the Mac** (syncs the code, builds it, runs every test):
+Arch:
 
 ```bash
-scripts/vm-test.sh <your-vm-username>@192.168.64.3
+sudo pacman -S base-devel cmake pkgconf fuse3
 ```
 
-**Try it by hand inside the VM:**
+## Build and test
+
+```bash
+cmake -S . -B build
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+`ctest` runs both the unit tests and the smoke test, which mounts memfs in a
+temporary directory.
+
+To build with AddressSanitizer and UndefinedBehaviorSanitizer turned on
+(recommended while hacking on it):
+
+```bash
+cmake -S . -B build -DMEMFS_SANITIZE=ON
+```
+
+## Try it
 
 ```bash
 mkdir -p ~/mnt
 ./build/memfs ~/mnt -f -d     # -f foreground, -d prints every FUSE request
-# in a second terminal:
-cd ~/mnt && echo hi > x && cat x && ls -la && df -h .
-fusermount3 -u ~/mnt          # unmount
 ```
+
+In a second terminal:
+
+```bash
+cd ~/mnt
+echo hi > x && cat x
+mkdir -p a/b && mv x a/b/
+ls -laR
+df -h .
+```
+
+When you're done, unmount (or press Ctrl+C in the first terminal):
+
+```bash
+fusermount3 -u ~/mnt
+```
+
+Leave out `-f` to run memfs in the background like a normal daemon. Add `-s`
+to make it single-threaded, which makes debugging easier.
 
 Watching the `-d` output while you run `ls` or `cp` is the best way to see
 which syscalls turn into which callbacks.
